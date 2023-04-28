@@ -122,29 +122,7 @@ func (c *Client) UserTweets(ctx context.Context, userID string, cursor string) (
 				if tw.Legacy.AuthorID != userID {
 					break
 				}
-				// TODO: entities
-				tweet := twitter.Tweet{
-					TweetNoIncludes: twitter.TweetNoIncludes{
-						ID:              tw.RestID,
-						Text:            tw.Legacy.Text,
-						AuthorID:        tw.Legacy.AuthorID,
-						ConversationID:  tw.Legacy.ConversationID,
-						CreatedAt:       tw.Legacy.CreatedAt,
-						InReplyToUserID: tw.Legacy.InReplyToUserID,
-						//ReferencedTweets: nil,
-						//Entities:
-						//Attachments:
-					},
-					//Includes:,
-				}
-				if replyTo := tw.Legacy.InReplyToStatusID; replyTo != "" {
-					tweet.ReferencedTweets = append(tweet.ReferencedTweets,
-						twitter.ReferencedTweet{Type: "replied_to", ID: replyTo})
-				}
-				// quoted
-				// retweeted
-
-				r.Tweets = append(r.Tweets, tweet)
+				r.Tweets = append(r.Tweets, tw.Tweet())
 			case *graphqlTimelineCursor:
 				switch c.CursorType {
 				case "Top":
@@ -259,29 +237,8 @@ func (c *Client) TweetDetail(ctx context.Context, tweetID string) (*TweetDetailR
 				if tw.Legacy.ID != tweetID {
 					break
 				}
-				// TODO: entities
-				tweet := twitter.Tweet{
-					TweetNoIncludes: twitter.TweetNoIncludes{
-						ID:              tw.RestID,
-						Text:            tw.Legacy.Text,
-						AuthorID:        tw.Legacy.AuthorID,
-						ConversationID:  tw.Legacy.ConversationID,
-						CreatedAt:       tw.Legacy.CreatedAt,
-						InReplyToUserID: tw.Legacy.InReplyToUserID,
-						//ReferencedTweets: nil,
-						//Entities:
-						//Attachments:
-					},
-					//Includes:,
-				}
-				if replyTo := tw.Legacy.InReplyToStatusID; replyTo != "" {
-					tweet.ReferencedTweets = append(tweet.ReferencedTweets,
-						twitter.ReferencedTweet{Type: "replied_to", ID: replyTo})
-				}
-				// quoted
-				// retweeted
 
-				r.Tweet = tweet
+				r.Tweet = tw.Tweet()
 				r.RawJSON, _ = json.Marshal(ttw)
 				return r, nil
 			}

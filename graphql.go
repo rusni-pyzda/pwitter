@@ -58,34 +58,6 @@ type userTweetsResponse struct {
 	Errors errors `json:"errors,omitempty"`
 }
 
-type entities struct {
-	Media []entityMedia `json:"media"`
-	URLs  []entityURL   `json:"urls"`
-	//UserMentions []entityUserMention `json:"user_mentions"`
-	//Hashtags     []entityHashtag     `json:"hashtags"`
-	//Symbols      []entitySymbol      `json:"symbols"`
-}
-
-type entityMedia struct {
-	Type                 string `json:"type"`
-	ID                   string `json:"id_str"`
-	URL                  string `json:"url"`
-	DisplayURL           string `json:"display_url"`
-	ExpandedURL          string `json:"expanded_url"`
-	Indices              []int  `json:"indices"`
-	MediaURLHTTPS        string `json:"media_url_https"`
-	MediaKey             string `json:"media_key"`
-	ExtMediaAvailability struct {
-		Status string `json:"status"`
-	} `json:"ext_media_availability"`
-	Sizes        struct{} `json:"sizes"`
-	OriginalInfo struct{} `json:"original_info"`
-}
-
-type entityURL struct {
-}
-
-// {"focalTweetId":"1647629006089461760","with_rux_injections":false,"includePromotedContent":true,"withCommunity":true,"withQuickPromoteEligibilityTweetFields":true,"withBirdwatchNotes":false,"withVoice":true,"withV2Timeline":true}
 type tweetDetailVariables struct {
 	ID                                     string `json:"focalTweetId"`
 	WithRuxInjections                      bool   `json:"with_rux_injections"`
