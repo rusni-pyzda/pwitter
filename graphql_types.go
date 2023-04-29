@@ -3,12 +3,14 @@ package pwitter
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/Ukraine-DAO/twitter-threads/twitter"
 )
 
 var (
 	graphqlType = map[string]func() interface{}{
+		"TimelineTimelineModule": func() interface{} { return &graphqlTimelineModule{} },
 		"TimelineTimelineCursor": func() interface{} { return &graphqlTimelineCursor{} },
 		"TimelineTimelineItem":   func() interface{} { return &graphqlTimelineItem{} },
 		"TimelineTweet":          func() interface{} { return &graphqlTimelineTweet{} },
@@ -127,6 +129,14 @@ type graphqlTweetCore struct {
 	} `json:"user_results,omitempty"`
 }
 
+func convertTimestamp(ts string) string {
+	t, err := time.Parse(time.RubyDate, ts)
+	if err != nil {
+		return ts
+	}
+	return t.Format("2006-01-02T15:04:05.000Z07:00")
+}
+
 func (t *graphqlTweet) Tweet() twitter.Tweet {
 	r := twitter.Tweet{
 		TweetNoIncludes: twitter.TweetNoIncludes{
@@ -134,10 +144,12 @@ func (t *graphqlTweet) Tweet() twitter.Tweet {
 			Text:            t.Legacy.Text,
 			AuthorID:        t.Legacy.AuthorID,
 			ConversationID:  t.Legacy.ConversationID,
-			CreatedAt:       t.Legacy.CreatedAt,
+			CreatedAt:       convertTimestamp(t.Legacy.CreatedAt),
 			InReplyToUserID: t.Legacy.InReplyToUserID,
 		},
 	}
+	userIncluded := map[string]bool{}
+	mediaIncluded := map[string]bool{}
 	if t.Core.UserResults.Result != nil {
 		u, err := t.Core.UserResults.Result.Parse()
 		if err == nil {
@@ -149,6 +161,7 @@ func (t *graphqlTweet) Tweet() twitter.Tweet {
 						Name:     u.Legacy.Name,
 						Username: u.Legacy.ScreenName,
 					})
+					userIncluded[u.RestID] = true
 				}
 			}
 		}
@@ -171,9 +184,21 @@ func (t *graphqlTweet) Tweet() twitter.Tweet {
 						twitter.ReferencedTweet{Type: "retweeted", ID: tw.RestID})
 					converted := tw.Tweet()
 					r.Includes.Tweets = append(r.Includes.Tweets, converted.TweetNoIncludes)
-					r.Includes.Media = append(r.Includes.Media, converted.Includes.Media...)
-					r.Includes.Users = append(r.Includes.Users, converted.Includes.Users...)
 					r.Includes.Tweets = append(r.Includes.Tweets, converted.Includes.Tweets...)
+					for _, u := range converted.Includes.Users {
+						if userIncluded[u.ID] {
+							continue
+						}
+						r.Includes.Users = append(r.Includes.Users, u)
+						userIncluded[u.ID] = true
+					}
+					for _, m := range converted.Includes.Media {
+						if mediaIncluded[m.Key] {
+							continue
+						}
+						r.Includes.Media = append(r.Includes.Media, m)
+						mediaIncluded[m.Key] = true
+					}
 				}
 			}
 		}
@@ -199,11 +224,14 @@ func (t *graphqlTweet) Tweet() twitter.Tweet {
 				TextEntity: twitter.TextEntity{Start: uint16(me.Indices[0]), End: uint16(me.Indices[1])},
 				Username:   me.ScreenName,
 			})
-			r.Includes.Users = append(r.Includes.Users, twitter.TwitterUser{
-				ID:       me.ID,
-				Name:     me.Name,
-				Username: me.ScreenName,
-			})
+			if !userIncluded[me.ID] {
+				r.Includes.Users = append(r.Includes.Users, twitter.TwitterUser{
+					ID:       me.ID,
+					Name:     me.Name,
+					Username: me.ScreenName,
+				})
+				userIncluded[me.ID] = true
+			}
 		}
 	}
 
@@ -216,16 +244,32 @@ func (t *graphqlTweet) Tweet() twitter.Tweet {
 				ExpandedURL: e.ExpandedURL,
 				DisplayURL:  e.DisplayURL,
 			})
+
+			if mediaIncluded[e.MediaKey] {
+				continue
+			}
 			m := twitter.Media{
-				Type:       e.Type,
-				Key:        e.MediaKey,
-				URL:        e.ExpandedURL,
-				PreviewURL: e.MediaURLHTTPS,
+				Type: e.Type,
+				Key:  e.MediaKey,
+			}
+			switch e.Type {
+			case "photo":
+				m.URL = e.MediaURLHTTPS
+			default:
+				m.PreviewURL = e.MediaURLHTTPS
 			}
 			if e.VideoInfo != nil {
 				_ = json.Unmarshal(e.VideoInfo.Variants, &m.Variants)
+				for i, v := range m.Variants {
+					if b, ok := v["bitrate"]; ok {
+						v["bit_rate"] = b
+						delete(v, "bitrate")
+						m.Variants[i] = v
+					}
+				}
 			}
 			r.Includes.Media = append(r.Includes.Media, m)
+			mediaIncluded[m.Key] = true
 		}
 	}
 
@@ -307,4 +351,12 @@ type entityUserMention struct {
 	Name       string `json:"name"`
 	ScreenName string `json:"screen_name"`
 	ID         string `json:"id_str"`
+}
+
+type graphqlTimelineModule struct {
+	Items []struct {
+		Item struct {
+			ItemContent *graphqlObject `json:"itemContent"`
+		} `json:"item"`
+	} `json:"items"`
 }

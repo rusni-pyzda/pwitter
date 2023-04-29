@@ -33,6 +33,7 @@ func (c *Client) UserTweets(ctx context.Context, userID string, cursor string) (
 	log := zerolog.Ctx(ctx).With().
 		Str("user_id", userID).
 		Str("method", "UserTweets").Logger()
+	ctx = log.WithContext(ctx)
 
 	vars, features := userTweetsVarsAndFeatures(userID, cursor)
 	params := url.Values{}
@@ -109,6 +110,10 @@ func (c *Client) UserTweets(ctx context.Context, userID string, cursor string) (
 					log.Info().Msgf("item content has unexpected type %T", ttw)
 					break
 				}
+				if ttw.TweetResults == nil || ttw.TweetResults.Result == nil {
+					log.Debug().Msgf("missing tweet data in timeline tweet")
+					break
+				}
 				t, err = ttw.TweetResults.Result.Parse()
 				if err != nil {
 					log.Info().Msgf("failed to parse tweet results: %s", err)
@@ -140,6 +145,9 @@ func errorFromResponse(resp *http.Response) error {
 	if resp.StatusCode == 200 {
 		return nil
 	}
+	if resp.StatusCode == 429 {
+		return twitter.ErrThrottled
+	}
 	body, _ := io.ReadAll(resp.Body)
 	headers := []string{}
 	for k, vs := range resp.Header {
@@ -163,6 +171,7 @@ func (c *Client) TweetDetail(ctx context.Context, tweetID string) (*TweetDetailR
 	log := zerolog.Ctx(ctx).With().
 		Str("tweet_id", tweetID).
 		Str("method", "TweetDetail").Logger()
+	ctx = log.WithContext(ctx)
 
 	vars, features := tweetDetailVarsAndFeatures(tweetID)
 	params := url.Values{}
@@ -224,6 +233,10 @@ func (c *Client) TweetDetail(ctx context.Context, tweetID string) (*TweetDetailR
 					log.Info().Msgf("item content has unexpected type %T", ttw)
 					break
 				}
+				if ttw.TweetResults == nil || ttw.TweetResults.Result == nil {
+					log.Debug().Msgf("missing tweet data in timeline tweet")
+					break
+				}
 				t, err = ttw.TweetResults.Result.Parse()
 				if err != nil {
 					log.Info().Msgf("failed to parse tweet results: %s", err)
@@ -246,4 +259,205 @@ func (c *Client) TweetDetail(ctx context.Context, tweetID string) (*TweetDetailR
 	}
 
 	return nil, fmt.Errorf("requested tweet is missing from the response")
+}
+
+func (c *Client) UserTweetsAndReplies(ctx context.Context, userID string, cursor string) (*UserTweetsResponse, error) {
+	if c.Client == nil {
+		c.Client = http.DefaultClient
+	}
+
+	log := zerolog.Ctx(ctx).With().
+		Str("user_id", userID).
+		Str("method", "UserTweetsAndReplies").Logger()
+	ctx = log.WithContext(ctx)
+
+	vars, features := userTweetsVarsAndFeatures(userID, cursor)
+	params := url.Values{}
+	params.Set("variables", vars)
+	params.Set("features", features)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", graphQLQueryUrl("UserTweetsAndReplies")+"?"+params.Encode(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request object: %w", err)
+	}
+
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("Pragma", "no-cache")
+	req.Header.Set("Cache-Control", "no-cache")
+
+	c.Authorizer.SetAuthHeader(req)
+
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("sending HTTP request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if err := errorFromResponse(resp); err != nil {
+		return nil, fmt.Errorf("UserTweets: %w", err)
+	}
+
+	data := &userTweetsResponse{}
+	if err := json.NewDecoder(resp.Body).Decode(data); err != nil {
+		return nil, fmt.Errorf("unmarshaling JSON response: %w", err)
+	}
+
+	r := &UserTweetsResponse{}
+	r.RawJSON, _ = json.Marshal(data)
+
+	v, err := data.Data.User.Result.Parse()
+	if err != nil {
+		return nil, fmt.Errorf("parsing data.user.result: %w", err)
+	}
+
+	u, ok := v.(*graphqlUser)
+	if !ok {
+		return nil, fmt.Errorf("data.user.result has unexpected type %q", data.Data.User.Result.TypeName)
+	}
+
+	timeline := u.TimelineV2
+	if timeline == nil {
+		return nil, fmt.Errorf("no timeline found in the response")
+	}
+
+	for _, instr := range timeline.Timeline.Instructions {
+		if instr.Type != timelineAddEntries {
+			continue
+		}
+		for _, e := range instr.Entries {
+			c, err := e.Content.Parse()
+			if err != nil {
+				log.Info().Msgf("failed to parse instruction content: %s", err)
+				continue
+			}
+			switch c := c.(type) {
+			case *graphqlTimelineItem:
+				if c.ItemContent.TypeName != "TimelineTweet" {
+					break
+				}
+				t, err := c.ItemContent.Parse()
+				if err != nil {
+					log.Info().Msgf("failed to parse item content: %s", err)
+					break
+				}
+				ttw, ok := t.(*graphqlTimelineTweet)
+				if !ok {
+					log.Info().Msgf("item content has unexpected type %T", ttw)
+					break
+				}
+				if ttw.TweetResults == nil || ttw.TweetResults.Result == nil {
+					log.Debug().Msgf("missing tweet data in timeline tweet")
+					break
+				}
+				t, err = ttw.TweetResults.Result.Parse()
+				if err != nil {
+					log.Info().Msgf("failed to parse tweet results: %s", err)
+					break
+				}
+				tw, ok := t.(*graphqlTweet)
+				if !ok {
+					log.Info().Msgf("tweet results have unexpected type %T", tw)
+					break
+				}
+				if tw.Legacy.AuthorID != userID {
+					break
+				}
+				r.Tweets = append(r.Tweets, tw.Tweet())
+			case *graphqlTimelineModule:
+				for _, i := range c.Items {
+					if i.Item.ItemContent == nil {
+						continue
+					}
+					t, err := i.Item.ItemContent.Parse()
+					if err != nil {
+						log.Info().Err(err).Msgf("parsing item.itemContent")
+						continue
+					}
+					tw, ok := t.(*graphqlTweet)
+					if !ok {
+						log.Info().Msgf("itemContent has unexpected type %T", tw)
+						break
+					}
+					if tw.Legacy.AuthorID != userID {
+						break
+					}
+					r.Tweets = append(r.Tweets, tw.Tweet())
+				}
+			case *graphqlTimelineCursor:
+				switch c.CursorType {
+				case "Top":
+					r.CursorPrev = c.Value
+				case "Bottom":
+					r.CursorNext = c.Value
+				}
+			}
+		}
+	}
+	return r, nil
+}
+
+type UserByScreenNameResponse struct {
+	RawJSON []byte
+	ID      string
+}
+
+func (c *Client) UserByScreenName(ctx context.Context, userID string) (*UserByScreenNameResponse, error) {
+	if c.Client == nil {
+		c.Client = http.DefaultClient
+	}
+
+	log := zerolog.Ctx(ctx).With().
+		Str("user_id", userID).
+		Str("method", "UserByScreenName").Logger()
+	ctx = log.WithContext(ctx)
+
+	vars, features := userByScreenNameVarsAndFeatures(userID)
+	params := url.Values{}
+	params.Set("variables", vars)
+	params.Set("features", features)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", graphQLQueryUrl("UserByScreenName")+"?"+params.Encode(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request object: %w", err)
+	}
+
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("Pragma", "no-cache")
+	req.Header.Set("Cache-Control", "no-cache")
+
+	c.Authorizer.SetAuthHeader(req)
+
+	resp, err := c.Client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("sending HTTP request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if err := errorFromResponse(resp); err != nil {
+		return nil, fmt.Errorf("UserTweets: %w", err)
+	}
+
+	data := &userByScreenNameResponse{}
+	if err := json.NewDecoder(resp.Body).Decode(data); err != nil {
+		return nil, fmt.Errorf("unmarshaling JSON response: %w", err)
+	}
+
+	r := &UserByScreenNameResponse{}
+	r.RawJSON, _ = json.Marshal(data)
+
+	v, err := data.Data.User.Result.Parse()
+	if err != nil {
+		return nil, fmt.Errorf("parsing data.user.result: %w", err)
+	}
+
+	u, ok := v.(*graphqlUser)
+	if !ok {
+		return nil, fmt.Errorf("data.user.result has unexpected type %q", data.Data.User.Result.TypeName)
+	}
+
+	r.ID = u.RestID
+
+	return r, nil
 }

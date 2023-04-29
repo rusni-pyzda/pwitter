@@ -7,9 +7,11 @@ import (
 
 var (
 	graphqlID = map[string]string{
-		"UserTweets":   "HuTx74BxAnezK1gWvYY7zg",
-		"TweetDetail":  "BbCrSoXIR7z93lLCVFlQ2Q",
-		"UserByRestId": "GazOglcBvgLigl3ywt6b3Q",
+		"UserTweets":           "HuTx74BxAnezK1gWvYY7zg",
+		"TweetDetail":          "BbCrSoXIR7z93lLCVFlQ2Q",
+		"UserByRestId":         "GazOglcBvgLigl3ywt6b3Q",
+		"UserTweetsAndReplies": "zQxfEr5IFxQ2QZ-XMJlKew",
+		"UserByScreenName":     "sLVLhk0bGj3MVFEKTdax1w",
 	}
 )
 
@@ -88,6 +90,30 @@ type tweetDetailResponse struct {
 		ThreadedConversationWithInjectionsV2 struct {
 			Instructions []timelineInstruction `json:"instructions"`
 		} `json:"threaded_conversation_with_injections_v2"`
+	} `json:"data"`
+	Errors errors `json:"errors,omitempty"`
+}
+
+type userByScreenNameVariables struct {
+	ScreenName               string `json:"screen_name"`
+	WithSafetyModeUserFields bool   `json:"withSafetyModeUserFields"`
+}
+
+func userByScreenNameVarsAndFeatures(username string) (string, string) {
+	v := &userByScreenNameVariables{
+		ScreenName:               username,
+		WithSafetyModeUserFields: true,
+	}
+
+	vars, _ := json.Marshal(v)
+	return string(vars), twitterFeatures
+}
+
+type userByScreenNameResponse struct {
+	Data struct {
+		User struct {
+			Result *graphqlObject `json:"result"`
+		} `json:"user"`
 	} `json:"data"`
 	Errors errors `json:"errors,omitempty"`
 }
