@@ -117,10 +117,13 @@ type graphqlTweetResults struct {
 }
 
 type graphqlTweet struct {
-	RestID string             `json:"rest_id,omitempty"`
-	Legacy graphqlTweetLegacy `json:"legacy,omitempty"`
-	Source string             `json:"source,omitempty"`
-	Core   graphqlTweetCore   `json:"core,omitempty"`
+	RestID             string             `json:"rest_id,omitempty"`
+	Legacy             graphqlTweetLegacy `json:"legacy,omitempty"`
+	Source             string             `json:"source,omitempty"`
+	Core               graphqlTweetCore   `json:"core,omitempty"`
+	QuotedStatusResult *struct {
+		Result *graphqlObject `json:"result"`
+	} `json:"quoted_status_result"`
 }
 
 type graphqlTweetCore struct {
@@ -174,6 +177,25 @@ func (t *graphqlTweet) Tweet() twitter.Tweet {
 		r.ReferencedTweets = append(r.ReferencedTweets,
 			twitter.ReferencedTweet{Type: "quoted", ID: quoted})
 	}
+	addTweet := func(converted twitter.Tweet) {
+		r.Includes.Tweets = append(r.Includes.Tweets, converted.TweetNoIncludes)
+		r.Includes.Tweets = append(r.Includes.Tweets, converted.Includes.Tweets...)
+		for _, u := range converted.Includes.Users {
+			if userIncluded[u.ID] {
+				continue
+			}
+			r.Includes.Users = append(r.Includes.Users, u)
+			userIncluded[u.ID] = true
+		}
+		for _, m := range converted.Includes.Media {
+			if mediaIncluded[m.Key] {
+				continue
+			}
+			r.Includes.Media = append(r.Includes.Media, m)
+			mediaIncluded[m.Key] = true
+		}
+	}
+
 	if rt := t.Legacy.RetweetedStatusResult; rt != nil {
 		if rt.Result != nil {
 			tw, err := rt.Result.Parse()
@@ -182,23 +204,19 @@ func (t *graphqlTweet) Tweet() twitter.Tweet {
 				if ok {
 					r.ReferencedTweets = append(r.ReferencedTweets,
 						twitter.ReferencedTweet{Type: "retweeted", ID: tw.RestID})
-					converted := tw.Tweet()
-					r.Includes.Tweets = append(r.Includes.Tweets, converted.TweetNoIncludes)
-					r.Includes.Tweets = append(r.Includes.Tweets, converted.Includes.Tweets...)
-					for _, u := range converted.Includes.Users {
-						if userIncluded[u.ID] {
-							continue
-						}
-						r.Includes.Users = append(r.Includes.Users, u)
-						userIncluded[u.ID] = true
-					}
-					for _, m := range converted.Includes.Media {
-						if mediaIncluded[m.Key] {
-							continue
-						}
-						r.Includes.Media = append(r.Includes.Media, m)
-						mediaIncluded[m.Key] = true
-					}
+					addTweet(tw.Tweet())
+				}
+			}
+		}
+	}
+
+	if rt := t.QuotedStatusResult; rt != nil {
+		if rt.Result != nil {
+			tw, err := rt.Result.Parse()
+			if err == nil {
+				tw, ok := tw.(*graphqlTweet)
+				if ok {
+					addTweet(tw.Tweet())
 				}
 			}
 		}
@@ -272,8 +290,6 @@ func (t *graphqlTweet) Tweet() twitter.Tweet {
 			mediaIncluded[m.Key] = true
 		}
 	}
-
-	// Includes.Tweets
 
 	return r
 }
