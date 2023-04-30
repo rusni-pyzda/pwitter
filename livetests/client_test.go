@@ -101,7 +101,6 @@ func TestTweetContent(t *testing.T) {
 			TestName: "Reply",
 			ID:       "560915635396296704",
 			want:     `{"id":"560915635396296704","text":"@cullenwire @SportsLabsAMP Great spending time with you today!","conversation_id":"560904140117639168","author_id":"2244994945","referenced_tweets":[{"type":"replied_to","id":"560904140117639168"}],"entities":{"mentions":[{"start":0,"end":11,"username":"cullenwire"},{"start":12,"end":26,"username":"SportsLabsAMP"}]},"attachments":{},"created_at":"2015-01-29T21:41:23.000Z","in_reply_to_user_id":"17514453","includes":{"users":[{"id":"2244994945","name":"Twitter Dev","username":"TwitterDev"},{"id":"17514453","name":"Bill Cullen","username":"cullenwire"}],"tweets":[{"id":"560904140117639168","text":"Thanks #twitterdrive @twitterdev for insanely efficient dev advocate time. Now to use the tools at @SportsLabsAMP ! http://t.co/sd1hjLsNL9","conversation_id":"560904140117639168","author_id":"17514453","entities":{"urls":[{"start":116,"end":138,"url":"http://t.co/sd1hjLsNL9","expanded_url":"https://twitter.com/cullenwire/status/560904140117639168/photo/1","display_url":"pic.twitter.com/sd1hjLsNL9"}],"hashtags":[{"start":7,"end":20,"tag":"twitterdrive"}],"mentions":[{"start":21,"end":32,"username":"TwitterDev"},{"start":99,"end":113,"username":"SportsLabsAMP"}]},"attachments":{"media_keys":["3_560904140054724608"]},"created_at":"2015-01-29T20:55:42.000Z"}]}}`,
-			skip:     true, // TODO(imax): add "replied_to" tweet to Includes.Tweets
 		},
 		{
 			TestName: "Quote retweet",

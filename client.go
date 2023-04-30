@@ -138,6 +138,10 @@ func (c *Client) UserTweets(ctx context.Context, userID string, cursor string) (
 			}
 		}
 	}
+	for i, tw := range r.Tweets {
+		c.backfillMissingReferencedTweets(ctx, &tw)
+		r.Tweets[i] = tw
+	}
 	return r, nil
 }
 
@@ -163,7 +167,7 @@ type TweetDetailResponse struct {
 	Tweet   twitter.Tweet
 }
 
-func (c *Client) TweetDetail(ctx context.Context, tweetID string) (*TweetDetailResponse, error) {
+func (c *Client) tweetDetail(ctx context.Context, tweetID string) (*TweetDetailResponse, error) {
 	if c.Client == nil {
 		c.Client = http.DefaultClient
 	}
@@ -259,6 +263,43 @@ func (c *Client) TweetDetail(ctx context.Context, tweetID string) (*TweetDetailR
 	}
 
 	return nil, fmt.Errorf("requested tweet is missing from the response")
+}
+
+func (c *Client) TweetDetail(ctx context.Context, tweetID string) (*TweetDetailResponse, error) {
+	if c.Client == nil {
+		c.Client = http.DefaultClient
+	}
+
+	log := zerolog.Ctx(ctx).With().
+		Str("tweet_id", tweetID).
+		Str("method", "TweetDetail").Logger()
+	ctx = log.WithContext(ctx)
+
+	resp, err := c.tweetDetail(ctx, tweetID)
+	if err != nil {
+		return nil, err
+	}
+	c.backfillMissingReferencedTweets(ctx, &resp.Tweet)
+	return resp, nil
+}
+
+func (c *Client) backfillMissingReferencedTweets(ctx context.Context, tw *twitter.Tweet) {
+	log := zerolog.Ctx(ctx)
+	refs := map[string]bool{}
+	for _, r := range tw.ReferencedTweets {
+		refs[r.ID] = true
+	}
+	for _, t := range tw.Includes.Tweets {
+		delete(refs, t.ID)
+	}
+	for id := range refs {
+		r, err := c.tweetDetail(ctx, id)
+		if err != nil {
+			log.Info().Err(err).Msgf("Failed to fetch tweet %q: %s", id, err)
+		}
+		// TODO(imax): merge in includes from r.Tweet
+		tw.Includes.Tweets = append(tw.Includes.Tweets, r.Tweet.TweetNoIncludes)
+	}
 }
 
 func (c *Client) UserTweetsAndReplies(ctx context.Context, userID string, cursor string) (*UserTweetsResponse, error) {
@@ -394,6 +435,10 @@ func (c *Client) UserTweetsAndReplies(ctx context.Context, userID string, cursor
 			}
 		}
 	}
+	for i, tw := range r.Tweets {
+		c.backfillMissingReferencedTweets(ctx, &tw)
+		r.Tweets[i] = tw
+	}
 	return r, nil
 }
 
@@ -402,17 +447,17 @@ type UserByScreenNameResponse struct {
 	ID      string
 }
 
-func (c *Client) UserByScreenName(ctx context.Context, userID string) (*UserByScreenNameResponse, error) {
+func (c *Client) UserByScreenName(ctx context.Context, username string) (*UserByScreenNameResponse, error) {
 	if c.Client == nil {
 		c.Client = http.DefaultClient
 	}
 
 	log := zerolog.Ctx(ctx).With().
-		Str("user_id", userID).
+		Str("user_id", username).
 		Str("method", "UserByScreenName").Logger()
 	ctx = log.WithContext(ctx)
 
-	vars, features := userByScreenNameVarsAndFeatures(userID)
+	vars, features := userByScreenNameVarsAndFeatures(username)
 	params := url.Values{}
 	params.Set("variables", vars)
 	params.Set("features", features)
