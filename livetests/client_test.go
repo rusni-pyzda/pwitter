@@ -8,11 +8,10 @@ import (
 	"testing"
 
 	"github.com/Ukraine-DAO/twitter-threads/twitter"
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/rs/zerolog"
 
 	. "github.com/rusni-pyzda/pwitter"
+	"github.com/rusni-pyzda/pwitter/tweetdiff"
 )
 
 const testAccountID = "783214" // https://twitter.com/Twitter
@@ -122,42 +121,7 @@ func TestTweetContent(t *testing.T) {
 				t.Fatalf("TweetDetail returned error: %s", err)
 			}
 
-			// We might return extra entries in includes.users and that's ok.
-			wantUser := map[string]bool{}
-			for _, u := range want.Includes.Users {
-				wantUser[u.ID] = true
-			}
-			filteredUsers := []twitter.TwitterUser{}
-			for _, u := range r.Tweet.Includes.Users {
-				if wantUser[u.ID] {
-					filteredUsers = append(filteredUsers, u)
-				}
-			}
-			r.Tweet.Includes.Users = filteredUsers
-
-			// Same with media
-			wantMedia := map[string]bool{}
-			for _, u := range want.Includes.Media {
-				wantMedia[u.Key] = true
-			}
-			filteredMedia := []twitter.Media{}
-			for _, u := range r.Tweet.Includes.Media {
-				if wantMedia[u.Key] {
-					filteredMedia = append(filteredMedia, u)
-				}
-			}
-			r.Tweet.Includes.Media = filteredMedia
-
-			sortVideoVariants := cmpopts.SortSlices(func(a map[string]interface{}, b map[string]interface{}) bool {
-				aa, oka := a["bit_rate"].(float64)
-				bb, okb := b["bit_rate"].(float64)
-				if oka && okb {
-					return aa < bb
-				}
-				return okb
-			})
-
-			diff := cmp.Diff(want, &r.Tweet, sortVideoVariants, cmpopts.EquateEmpty())
+			diff := tweetdiff.Diff(want, &r.Tweet)
 			if diff != "" {
 				t.Errorf("%s", diff)
 			}
